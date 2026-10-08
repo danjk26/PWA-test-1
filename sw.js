@@ -6,7 +6,6 @@ const urlsToCache = [
 ];
 
 self.addEventListener('install', event => {
-  // Force the waiting service worker to become the active service worker immediately
   self.skipWaiting();
   event.waitUntil(
     caches.open(CACHE_NAME)
@@ -15,7 +14,6 @@ self.addEventListener('install', event => {
 });
 
 self.addEventListener('activate', event => {
-  // Delete old caches (e.g., v1, v2, v3) automatically upon activation
   event.waitUntil(
     caches.keys().then(cacheNames => {
       return Promise.all(
@@ -36,7 +34,6 @@ self.addEventListener('fetch', event => {
   );
 });
 
-// Listen for a message from index.html to force an immediate update
 self.addEventListener('message', event => {
   if (event.data === 'skipWaiting') {
     self.skipWaiting();
