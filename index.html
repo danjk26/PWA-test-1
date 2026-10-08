@@ -5,27 +5,35 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Exercise Tracker</title>
     <link rel="manifest" href="manifest.json">
+    <!-- Chart.js for offline progress graphing -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         body { font-family: Segoe UI, sans-serif; margin: 0; padding: 20px; background-color: #f4f4f9; color: #333; }
-        .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); max-width: 450px; margin: 0 auto 20px auto; }
-        h1, h2 { text-align: center; margin-top: 0; }
+        .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); max-width: 480px; margin: 0 auto 20px auto; }
+        h1, h2, h3 { text-align: center; margin-top: 0; }
         label { display: block; margin-top: 10px; font-weight: bold; font-size: 0.9em; }
         input, select, button { width: 100%; padding: 12px; margin-top: 5px; border-radius: 8px; border: 1px solid #ccc; box-sizing: border-box; font-size: 1em; }
         button { background-color: #007bff; color: white; border: none; font-weight: bold; cursor: pointer; margin-top: 15px; }
         button:active { background-color: #0056b3; }
         
+        .inline-group { display: flex; gap: 10px; }
+        .inline-group > div { flex: 1; }
         .btn-row { display: flex; gap: 10px; margin-top: 10px; }
         .counter-btn { background-color: #28a745; font-size: 1.5em; padding: 18px; flex: 2; margin-top: 0; }
         .undo-btn { background-color: #dc3545; font-size: 1.2em; padding: 18px; flex: 1; margin-top: 0; }
         .save-set-btn { background-color: #17a2b8; font-size: 1.1em; padding: 15px; }
         .danger-btn { background-color: #dc3545; margin-top: 10px; }
+        .export-btn { background-color: #28a745; margin-top: 10px; }
+        .secondary-btn { background-color: #6c757d; margin-top: 10px; }
         
         .rep-display { text-align: center; font-size: 3em; font-weight: bold; margin: 10px 0; color: #007bff; }
-        .secondary-btn { background-color: #6c757d; margin-top: 10px; }
         .status-bar { text-align: center; font-size: 0.85em; padding: 5px; border-radius: 4px; margin-bottom: 15px; }
         
         .log-item { background: #f8f9fa; border-left: 4px solid #007bff; padding: 12px; margin-top: 10px; border-radius: 4px; font-size: 0.95em; }
         .log-date { font-size: 0.75em; color: #6c6c6c; margin-top: 4px; }
+        
+        .chart-container { position: relative; width: 100%; height: 260px; margin-top: 15px; }
+        input[type="file"] { display: none; }
     </style>
 </head>
 <body>
@@ -54,12 +62,25 @@
         <h2>2. Track Workout</h2>
         
         <label for="exercise-select">Select Exercise</label>
-        <select id="exercise-select">
+        <select id="exercise-select" onchange="updateChart()">
             <option value="">-- Choose an exercise --</option>
         </select>
 
-        <label for="intensity-input">Intensity / Weight</label>
-        <input type="text" id="intensity-input" placeholder="e.g., 10 lbs, Red Band">
+        <div class="inline-group">
+            <div>
+                <label for="weight-input">Weight / Load</label>
+                <input type="number" id="weight-input" placeholder="0" min="0" step="0.5" value="0">
+            </div>
+            <div>
+                <label for="unit-select">Unit</label>
+                <select id="unit-select">
+                    <option value="lbs">lbs</option>
+                    <option value="kg">kg</option>
+                    <option value="level">band level</option>
+                    <option value="bw">bodyweight</option>
+                </select>
+            </div>
+        </div>
 
         <label>Current Reps Completed</label>
         <div id="rep-count" class="rep-display">0</div>
@@ -73,25 +94,119 @@
         <button class="secondary-btn" onclick="resetReps()">Reset Rep Count</button>
     </div>
 
-    <!-- 3. WORKOUT HISTORY SECTION -->
+    <!-- 3. PROGRESS GRAPH SECTION -->
     <div class="card">
-        <h2>3. Workout History</h2>
+        <h2>3. Progress Chart</h2>
+        <label for="chart-metric-select">Metric to Plot</label>
+        <select id="chart-metric-select" onchange="updateChart()">
+            <option value="maxWeight">Max Weight / Load Per Day</option>
+            <option value="totalVolume">Total Volume (Reps × Weight)</option>
+            <option value="totalReps">Total Reps Completed</option>
+        </select>
+        
+        <div class="chart-container">
+            <canvas id="progressChart"></canvas>
+        </div>
+    </div>
+
+    <!-- 4. WORKOUT HISTORY SECTION -->
+    <div class="card">
+        <h2>4. Workout History</h2>
         <div id="history-container">No completed sets logged yet.</div>
         <button class="secondary-btn" onclick="clearHistory()" style="margin-top:15px; font-size: 0.8em;">Clear History Log</button>
     </div>
 
-    <!-- 4. UPDATE APP SECTION -->
+    <!-- 5. BACKUP & DATA MANAGEMENT -->
+    <div class="card">
+        <h2>5. Backup & Restore</h2>
+        <button class="export-btn" onclick="exportDataJSON()">Export JSON Backup</button>
+        <button class="export-btn" style="background-color: #20c997;" onclick="exportDataCSV()">Export CSV (Spreadsheet)</button>
+        
+        <input type="file" id="import-file" accept=".json" onchange="importDataJSON(event)">
+        <button class="secondary-btn" onclick="document.getElementById('import-file').click()">Import JSON Backup</button>
+    </div>
+
+    <!-- 6. UPDATE APP SECTION -->
     <div class="card" style="text-align: center;">
         <button id="update-btn" class="secondary-btn" onclick="checkForAppUpdate()">Check for App Update</button>
     </div>
 
     <script>
+        // --- INDEXEDDB SETUP ---
+        const DB_NAME = 'ExerciseTrackerDB';
+        const DB_VERSION = 1;
+        let db = null;
+
+        function openDB() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open(DB_NAME, DB_VERSION);
+                request.onupgradeneeded = (e) => {
+                    const database = e.target.result;
+                    if (!database.objectStoreNames.contains('exercises')) {
+                        database.createObjectStore('exercises', { keyPath: 'name' });
+                    }
+                    if (!database.objectStoreNames.contains('workoutHistory')) {
+                        const historyStore = database.createObjectStore('workoutHistory', { keyPath: 'id' });
+                        historyStore.createIndex('exercise', 'exercise', { unique: false });
+                        historyStore.createIndex('timestamp', 'timestamp', { unique: false });
+                    }
+                };
+                request.onsuccess = (e) => {
+                    db = e.target.result;
+                    resolve(db);
+                };
+                request.onerror = (e) => reject(e.target.error);
+            });
+        }
+
+        function dbGetAll(storeName) {
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(storeName, 'readonly');
+                const store = tx.objectStore(storeName);
+                const req = store.getAll();
+                req.onsuccess = () => resolve(req.result);
+                req.onerror = () => reject(req.error);
+            });
+        }
+
+        function dbPut(storeName, item) {
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(storeName, 'readwrite');
+                const store = tx.objectStore(storeName);
+                const req = store.put(item);
+                req.onsuccess = () => resolve(req.result);
+                req.onerror = () => reject(req.error);
+            });
+        }
+
+        function dbDelete(storeName, key) {
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(storeName, 'readwrite');
+                const store = tx.objectStore(storeName);
+                const req = store.delete(key);
+                req.onsuccess = () => resolve();
+                req.onerror = () => reject(req.error);
+            });
+        }
+
+        function dbClear(storeName) {
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(storeName, 'readwrite');
+                const store = tx.objectStore(storeName);
+                const req = store.clear();
+                req.onsuccess = () => resolve();
+                req.onerror = () => reject(req.error);
+            });
+        }
+
+        // Service Worker
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('sw.js')
                 .then(() => console.log('Service Worker Registered'))
                 .catch(err => console.log('Service Worker Failed', err));
         }
 
+        // Online/Offline UI Status
         const statusDiv = document.getElementById('status');
         function updateStatus() {
             if (navigator.onLine) {
@@ -109,13 +224,17 @@
         updateStatus();
 
         let currentReps = 0;
+        let myChart = null;
 
-        document.addEventListener('DOMContentLoaded', () => {
-            loadExerciseDropdowns();
-            renderHistory();
+        document.addEventListener('DOMContentLoaded', async () => {
+            await openDB();
+            await loadExerciseDropdowns();
+            await renderHistory();
+            initChart();
         });
 
-        function saveNewExercise() {
+        // --- EXERCISE MANAGEMENT ---
+        async function saveNewExercise() {
             const nameInput = document.getElementById('new-exercise-name');
             const exerciseName = nameInput.value.trim();
 
@@ -124,19 +243,18 @@
                 return;
             }
 
-            let exercises = JSON.parse(localStorage.getItem('exercises')) || [];
-            if (!exercises.includes(exerciseName)) {
-                exercises.push(exerciseName);
-                localStorage.setItem('exercises', JSON.stringify(exercises));
+            const existing = await dbGetAll('exercises');
+            if (!existing.some(ex => ex.name === exerciseName)) {
+                await dbPut('exercises', { name: exerciseName });
                 nameInput.value = '';
-                loadExerciseDropdowns();
+                await loadExerciseDropdowns();
                 alert(`Saved "${exerciseName}"!`);
             } else {
                 alert('That exercise already exists.');
             }
         }
 
-        function deleteExercise() {
+        async function deleteExercise() {
             const dropdown = document.getElementById('delete-exercise-select');
             const selectedExercise = dropdown.value;
 
@@ -146,35 +264,35 @@
             }
 
             if (confirm(`Are you sure you want to delete "${selectedExercise}"?`)) {
-                let exercises = JSON.parse(localStorage.getItem('exercises')) || [];
-                exercises = exercises.filter(ex => ex !== selectedExercise);
-                localStorage.setItem('exercises', JSON.stringify(exercises));
-                loadExerciseDropdowns();
+                await dbDelete('exercises', selectedExercise);
+                await loadExerciseDropdowns();
                 alert(`Deleted "${selectedExercise}".`);
             }
         }
 
-        function loadExerciseDropdowns() {
+        async function loadExerciseDropdowns() {
             const logDropdown = document.getElementById('exercise-select');
             const deleteDropdown = document.getElementById('delete-exercise-select');
-            const exercises = JSON.parse(localStorage.getItem('exercises')) || [];
+            const exercises = await dbGetAll('exercises');
 
             logDropdown.innerHTML = '<option value="">-- Choose an exercise --</option>';
             deleteDropdown.innerHTML = '<option value="">-- Select exercise to delete --</option>';
 
-            exercises.forEach(name => {
+            exercises.forEach(item => {
                 const opt1 = document.createElement('option');
-                opt1.value = name;
-                opt1.innerText = name;
+                opt1.value = item.name;
+                opt1.innerText = item.name;
                 logDropdown.appendChild(opt1);
 
                 const opt2 = document.createElement('option');
-                opt2.value = name;
-                opt2.innerText = name;
+                opt2.value = item.name;
+                opt2.innerText = item.name;
                 deleteDropdown.appendChild(opt2);
             });
+            updateChart();
         }
 
+        // --- REP COUNTER ---
         function addRep() {
             const selectedExercise = document.getElementById('exercise-select').value;
             if (!selectedExercise) {
@@ -197,9 +315,11 @@
             document.getElementById('rep-count').innerText = currentReps;
         }
 
-        function commitSet() {
+        // --- LOGGING WORKOUT SETS ---
+        async function commitSet() {
             const selectedExercise = document.getElementById('exercise-select').value;
-            const intensity = document.getElementById('intensity-input').value.trim() || 'Bodyweight / Default';
+            const weightVal = parseFloat(document.getElementById('weight-input').value) || 0;
+            const unitVal = document.getElementById('unit-select').value;
 
             if (!selectedExercise) {
                 alert('Please select an exercise before saving.');
@@ -211,52 +331,185 @@
                 return;
             }
 
+            const now = new Date();
             const newSet = {
-                id: Date.now(),
+                id: now.getTime(),
                 exercise: selectedExercise,
-                intensity: intensity,
+                weight: weightVal,
+                unit: unitVal,
                 reps: currentReps,
-                timestamp: new Date().toLocaleString()
+                timestamp: now.toISOString(),
+                displayDate: now.toLocaleString()
             };
 
-            let history = JSON.parse(localStorage.getItem('workoutHistory')) || [];
-            history.unshift(newSet);
-            localStorage.setItem('workoutHistory', JSON.stringify(history));
+            await dbPut('workoutHistory', newSet);
 
             resetReps();
-            renderHistory();
-            alert('Set saved to history!');
+            await renderHistory();
+            updateChart();
+            alert('Set saved to database!');
         }
 
-        function renderHistory() {
+        async function renderHistory() {
             const container = document.getElementById('history-container');
-            const history = JSON.parse(localStorage.getItem('workoutHistory')) || [];
+            const history = await dbGetAll('workoutHistory');
 
             if (history.length === 0) {
                 container.innerHTML = '<p style="text-align:center; color:#777;">No completed sets logged yet.</p>';
                 return;
             }
 
+            // Display newest entries first
+            history.sort((a, b) => b.id - a.id);
+
             container.innerHTML = '';
             history.forEach(item => {
                 const div = document.createElement('div');
                 div.className = 'log-item';
                 div.innerHTML = `
-                    <strong>${item.exercise}</strong> — ${item.reps} reps @ <em>${item.intensity}</em>
-                    <div class="log-date">${item.timestamp}</div>
+                    <strong>${item.exercise}</strong> — ${item.reps} reps @ <em>${item.weight} ${item.unit}</em>
+                    <div class="log-date">${item.displayDate || new Date(item.timestamp).toLocaleString()}</div>
                 `;
                 container.appendChild(div);
             });
         }
 
-        function clearHistory() {
+        async function clearHistory() {
             if (confirm('Are you sure you want to clear your entire workout history log?')) {
-                localStorage.removeItem('workoutHistory');
-                renderHistory();
+                await dbClear('workoutHistory');
+                await renderHistory();
+                updateChart();
             }
         }
 
-        // Cache-busting update checker
+        // --- CHARTING ENGINE ---
+        function initChart() {
+            const ctx = document.getElementById('progressChart').getContext('2d');
+            myChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Progress',
+                        data: [],
+                        borderColor: '#007bff',
+                        backgroundColor: 'rgba(0, 123, 255, 0.1)',
+                        fill: true,
+                        tension: 0.2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: { display: true },
+                        y: { beginAtZero: true }
+                    }
+                }
+            });
+        }
+
+        async function updateChart() {
+            if (!myChart) return;
+            const selectedExercise = document.getElementById('exercise-select').value;
+            const metric = document.getElementById('chart-metric-select').value;
+
+            if (!selectedExercise) {
+                myChart.data.labels = [];
+                myChart.data.datasets[0].data = [];
+                myChart.update();
+                return;
+            }
+
+            const allHistory = await dbGetAll('workoutHistory');
+            const exerciseData = allHistory
+                .filter(item => item.exercise === selectedExercise)
+                .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+            // Group sets by date string (YYYY-MM-DD)
+            const grouped = {};
+            exerciseData.forEach(item => {
+                const dateKey = new Date(item.timestamp).toLocaleDateString();
+                if (!grouped[dateKey]) grouped[dateKey] = [];
+                grouped[dateKey].push(item);
+            });
+
+            const labels = Object.keys(grouped);
+            const dataValues = labels.map(dateKey => {
+                const sets = grouped[dateKey];
+                if (metric === 'maxWeight') {
+                    return Math.max(...sets.map(s => s.weight));
+                } else if (metric === 'totalVolume') {
+                    return sets.reduce((sum, s) => sum + (s.weight * s.reps), 0);
+                } else if (metric === 'totalReps') {
+                    return sets.reduce((sum, s) => sum + s.reps, 0);
+                }
+            });
+
+            myChart.data.labels = labels;
+            myChart.data.datasets[0].label = `${selectedExercise} (${metric})`;
+            myChart.data.datasets[0].data = dataValues;
+            myChart.update();
+        }
+
+        // --- BACKUP IMPORT & EXPORT ---
+        async function exportDataJSON() {
+            const exercises = await dbGetAll('exercises');
+            const workoutHistory = await dbGetAll('workoutHistory');
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify({ exercises, workoutHistory }, null, 2));
+            
+            const dlAnchor = document.createElement('a');
+            dlAnchor.setAttribute("href", dataStr);
+            dlAnchor.setAttribute("download", `exercise_tracker_backup_${Date.now()}.json`);
+            document.body.appendChild(dlAnchor);
+            dlAnchor.click();
+            dlAnchor.remove();
+        }
+
+        async function exportDataCSV() {
+            const workoutHistory = await dbGetAll('workoutHistory');
+            if (workoutHistory.length === 0) {
+                alert('No workout history available to export.');
+                return;
+            }
+
+            let csvContent = "data:text/csv;charset=utf-8,ID,Exercise,Weight,Unit,Reps,Timestamp,Date\n";
+            workoutHistory.forEach(item => {
+                const dateStr = item.displayDate ? `"${item.displayDate}"` : `"${new Date(item.timestamp).toLocaleString()}"`;
+                csvContent += `${item.id},"${item.exercise}",${item.weight},"${item.unit}",${item.reps},"${item.timestamp}",${dateStr}\n`;
+            });
+
+            const dlAnchor = document.createElement('a');
+            dlAnchor.setAttribute("href", encodeURI(csvContent));
+            dlAnchor.setAttribute("download", `workout_history_${Date.now()}.csv`);
+            document.body.appendChild(dlAnchor);
+            dlAnchor.click();
+            dlAnchor.remove();
+        }
+
+        function importDataJSON(event) {
+            const fileReader = new FileReader();
+            fileReader.onload = async (e) => {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    if (data.exercises && Array.isArray(data.exercises)) {
+                        for (let ex of data.exercises) await dbPut('exercises', ex);
+                    }
+                    if (data.workoutHistory && Array.isArray(data.workoutHistory)) {
+                        for (let item of data.workoutHistory) await dbPut('workoutHistory', item);
+                    }
+                    await loadExerciseDropdowns();
+                    await renderHistory();
+                    updateChart();
+                    alert('Data imported successfully!');
+                } catch (err) {
+                    alert('Invalid JSON file format.');
+                }
+            };
+            fileReader.readAsText(event.target.files[0]);
+        }
+
+        // --- APP UPDATE CHECKER ---
         function checkForAppUpdate() {
             const updateBtn = document.getElementById('update-btn');
             updateBtn.innerText = 'Checking GitHub...';
@@ -277,7 +530,6 @@
                         }
                     });
 
-                    // Bypass HTTP cache by fetching sw.js with a timestamp
                     fetch('./sw.js?t=' + Date.now(), { cache: 'no-store' })
                         .then(() => registration.update())
                         .then(() => {
