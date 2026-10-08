@@ -33,9 +33,15 @@
         
         .inline-group { display: flex; gap: 10px; }
         .inline-group > div { flex: 1; }
+        
+        /* Multiplier Toggle Bar */
+        .multiplier-bar { display: flex; gap: 8px; margin-top: 8px; }
+        .mult-btn { flex: 1; padding: 8px; font-size: 0.85em; background: #e9ecef; color: #495057; border: 1px solid #ced4da; margin-top: 0; }
+        .mult-btn.active { background: #007bff; color: white; border-color: #007bff; }
+        
         .btn-row { display: flex; gap: 10px; margin-top: 10px; }
-        .counter-btn { background-color: #28a745; font-size: 1.5em; padding: 18px; flex: 2; margin-top: 0; }
-        .undo-btn { background-color: #dc3545; font-size: 1.2em; padding: 18px; flex: 1; margin-top: 0; }
+        .counter-btn { background-color: #28a745; font-size: 1.4em; padding: 18px; flex: 2; margin-top: 0; }
+        .undo-btn { background-color: #dc3545; font-size: 1.1em; padding: 18px; flex: 1; margin-top: 0; }
         .save-set-btn { background-color: #17a2b8; font-size: 1.1em; padding: 15px; }
         .danger-btn { background-color: #dc3545; margin-top: 10px; }
         .export-btn { background-color: #28a745; margin-top: 10px; }
@@ -81,10 +87,7 @@
                 <div>
                     <label for="unit-select">Unit</label>
                     <select id="unit-select">
-                        <option value="lbs">lbs</option>
-                        <option value="kg">kg</option>
-                        <option value="level">band level</option>
-                        <option value="bw">bodyweight</option>
+                        <!-- Populated dynamically from IndexedDB -->
                     </select>
                 </div>
             </div>
@@ -92,9 +95,17 @@
             <label>Current Reps Completed</label>
             <div id="rep-count" class="rep-display">0</div>
 
+            <!-- Rep Multiplier Selector -->
+            <label>Add Step Increment</label>
+            <div class="multiplier-bar">
+                <button class="mult-btn active" onclick="setStep(1, this)">+1</button>
+                <button class="mult-btn" onclick="setStep(5, this)">+5</button>
+                <button class="mult-btn" onclick="setStep(10, this)">+10</button>
+            </div>
+
             <div class="btn-row">
-                <button class="counter-btn" onclick="addRep()">+1 Rep</button>
-                <button class="undo-btn" onclick="undoRep()">-1 Rep</button>
+                <button id="add-rep-btn" class="counter-btn" onclick="addRep()">+1 Rep</button>
+                <button id="undo-rep-btn" class="undo-btn" onclick="undoRep()">-1 Rep</button>
             </div>
 
             <button class="save-set-btn" onclick="commitSet()">Save Completed Set</button>
@@ -122,12 +133,26 @@
     <div id="chart-page" class="page">
         <div class="card">
             <h2>Progress Chart</h2>
-            <label for="chart-metric-select">Metric to Plot</label>
-            <select id="chart-metric-select" onchange="updateChart()">
-                <option value="maxWeight">Max Weight / Load Per Day</option>
-                <option value="totalVolume">Total Volume (Reps × Weight)</option>
-                <option value="totalReps">Total Reps Completed</option>
-            </select>
+            
+            <div class="inline-group">
+                <div>
+                    <label for="chart-metric-select">Metric to Plot</label>
+                    <select id="chart-metric-select" onchange="updateChart()">
+                        <option value="sumWeight">Total Weight / Load (Sum)</option>
+                        <option value="maxWeight">Max Weight / Load Logged</option>
+                        <option value="totalVolume">Total Volume (Reps × Weight)</option>
+                        <option value="totalReps">Total Reps Completed</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="chart-timeframe-select">Group By</label>
+                    <select id="chart-timeframe-select" onchange="updateChart()">
+                        <option value="daily">Daily</option>
+                        <option value="weekly">Weekly</option>
+                        <option value="monthly">Monthly</option>
+                    </select>
+                </div>
+            </div>
             
             <div class="chart-container">
                 <canvas id="progressChart"></canvas>
@@ -146,6 +171,19 @@
 
     <!-- PAGE 5: BACKUP & SETTINGS -->
     <div id="settings-page" class="page">
+        <div class="card">
+            <h2>Manage Units</h2>
+            <label for="new-unit-name">Add Custom Unit</label>
+            <input type="text" id="new-unit-name" placeholder="e.g., stone, plates, sec">
+            <button onclick="saveNewUnit()">Add Unit</button>
+            
+            <label for="delete-unit-select" style="margin-top:20px;">Delete Existing Unit</label>
+            <select id="delete-unit-select">
+                <option value="">-- Select unit to delete --</option>
+            </select>
+            <button class="danger-btn" onclick="deleteUnit()">Delete Selected Unit</button>
+        </div>
+
         <div class="card">
             <h2>Backup & Data</h2>
             <button class="export-btn" onclick="exportDataJSON()">Export JSON Backup</button>
@@ -177,7 +215,7 @@
 
         // --- INDEXEDDB SETUP ---
         const DB_NAME = 'ExerciseTrackerDB';
-        const DB_VERSION = 1;
+        const DB_VERSION = 2;
         let db = null;
 
         function openDB() {
@@ -192,6 +230,9 @@
                         const historyStore = database.createObjectStore('workoutHistory', { keyPath: 'id' });
                         historyStore.createIndex('exercise', 'exercise', { unique: false });
                         historyStore.createIndex('timestamp', 'timestamp', { unique: false });
+                    }
+                    if (!database.objectStoreNames.contains('units')) {
+                        database.createObjectStore('units', { keyPath: 'name' });
                     }
                 };
                 request.onsuccess = (e) => {
@@ -267,14 +308,85 @@
         updateStatus();
 
         let currentReps = 0;
+        let repStep = 1;
         let myChart = null;
 
         document.addEventListener('DOMContentLoaded', async () => {
             await openDB();
+            await seedDefaultUnits();
+            await loadUnitsDropdowns();
             await loadExerciseDropdowns();
             await renderHistory();
             initChart();
         });
+
+        // --- UNITS MANAGEMENT ---
+        async function seedDefaultUnits() {
+            const existing = await dbGetAll('units');
+            if (existing.length === 0) {
+                const defaults = ['lbs', 'kg', 'level', 'bw'];
+                for (let u of defaults) {
+                    await dbPut('units', { name: u });
+                }
+            }
+        }
+
+        async function saveNewUnit() {
+            const input = document.getElementById('new-unit-name');
+            const unitName = input.value.trim().toLowerCase();
+
+            if (!unitName) {
+                alert('Please enter a unit name.');
+                return;
+            }
+
+            const existing = await dbGetAll('units');
+            if (!existing.some(u => u.name === unitName)) {
+                await dbPut('units', { name: unitName });
+                input.value = '';
+                await loadUnitsDropdowns();
+                alert(`Added unit "${unitName}"!`);
+            } else {
+                alert('That unit already exists.');
+            }
+        }
+
+        async function deleteUnit() {
+            const dropdown = document.getElementById('delete-unit-select');
+            const selectedUnit = dropdown.value;
+
+            if (!selectedUnit) {
+                alert('Please select a unit to delete.');
+                return;
+            }
+
+            if (confirm(`Are you sure you want to delete unit "${selectedUnit}"?`)) {
+                await dbDelete('units', selectedUnit);
+                await loadUnitsDropdowns();
+                alert(`Deleted unit "${selectedUnit}".`);
+            }
+        }
+
+        async function loadUnitsDropdowns() {
+            const trackSelect = document.getElementById('unit-select');
+            const deleteSelect = document.getElementById('delete-unit-select');
+            const units = await dbGetAll('units');
+
+            trackSelect.innerHTML = '';
+            deleteSelect.innerHTML = '<option value="">-- Select unit to delete --</option>';
+
+            units.forEach(u => {
+                const opt1 = document.createElement('option');
+                opt1.value = u.name;
+                opt1.innerText = u.name;
+                trackSelect.appendChild(opt1);
+
+                const opt2 = document.createElement('option');
+                opt2.value = u.name;
+                opt2.innerText = u.name;
+                deleteSelect.appendChild(opt2);
+            });
+        }
 
         // --- EXERCISE MANAGEMENT ---
         async function saveNewExercise() {
@@ -335,22 +447,33 @@
             updateChart();
         }
 
-        // --- REP COUNTER ---
+        // --- REP COUNTER & MULTIPLIER ---
+        function setStep(stepVal, btnElement) {
+            repStep = stepVal;
+            document.querySelectorAll('.mult-btn').forEach(b => b.classList.remove('active'));
+            btnElement.classList.add('active');
+            
+            document.getElementById('add-rep-btn').innerText = `+${repStep} Rep${repStep > 1 ? 's' : ''}`;
+            document.getElementById('undo-rep-btn').innerText = `-${repStep} Rep${repStep > 1 ? 's' : ''}`;
+        }
+
         function addRep() {
             const selectedExercise = document.getElementById('exercise-select').value;
             if (!selectedExercise) {
                 alert('Please select an exercise first!');
                 return;
             }
-            currentReps += 1;
+            currentReps += repStep;
             document.getElementById('rep-count').innerText = currentReps;
         }
 
         function undoRep() {
-            if (currentReps > 0) {
-                currentReps -= 1;
-                document.getElementById('rep-count').innerText = currentReps;
+            if (currentReps >= repStep) {
+                currentReps -= repStep;
+            } else {
+                currentReps = 0;
             }
+            document.getElementById('rep-count').innerText = currentReps;
         }
 
         function resetReps() {
@@ -362,7 +485,7 @@
         async function commitSet() {
             const selectedExercise = document.getElementById('exercise-select').value;
             const weightVal = parseFloat(document.getElementById('weight-input').value) || 0;
-            const unitVal = document.getElementById('unit-select').value;
+            const unitVal = document.getElementById('unit-select').value || 'lbs';
 
             if (!selectedExercise) {
                 alert('Please select an exercise before saving.');
@@ -451,10 +574,23 @@
             });
         }
 
+        function getTimeframeKey(dateObj, timeframe) {
+            if (timeframe === 'weekly') {
+                const startOfYear = new Date(dateObj.getFullYear(), 0, 1);
+                const pastDaysOfYear = (dateObj - startOfYear) / 86400000;
+                const weekNum = Math.ceil((pastDaysOfYear + startOfYear.getDay() + 1) / 7);
+                return `W${weekNum} (${dateObj.getFullYear()})`;
+            } else if (timeframe === 'monthly') {
+                return dateObj.toLocaleDateString(undefined, { year: 'numeric', month: 'short' });
+            }
+            return dateObj.toLocaleDateString(); // Daily default
+        }
+
         async function updateChart() {
             if (!myChart) return;
             const selectedExercise = document.getElementById('exercise-select').value;
             const metric = document.getElementById('chart-metric-select').value;
+            const timeframe = document.getElementById('chart-timeframe-select').value;
 
             if (!selectedExercise) {
                 myChart.data.labels = [];
@@ -470,15 +606,18 @@
 
             const grouped = {};
             exerciseData.forEach(item => {
-                const dateKey = new Date(item.timestamp).toLocaleDateString();
-                if (!grouped[dateKey]) grouped[dateKey] = [];
-                grouped[dateKey].push(item);
+                const d = new Date(item.timestamp);
+                const timeKey = getTimeframeKey(d, timeframe);
+                if (!grouped[timeKey]) grouped[timeKey] = [];
+                grouped[timeKey].push(item);
             });
 
             const labels = Object.keys(grouped);
-            const dataValues = labels.map(dateKey => {
-                const sets = grouped[dateKey];
-                if (metric === 'maxWeight') {
+            const dataValues = labels.map(key => {
+                const sets = grouped[key];
+                if (metric === 'sumWeight') {
+                    return sets.reduce((sum, s) => sum + s.weight, 0);
+                } else if (metric === 'maxWeight') {
                     return Math.max(...sets.map(s => s.weight));
                 } else if (metric === 'totalVolume') {
                     return sets.reduce((sum, s) => sum + (s.weight * s.reps), 0);
@@ -488,7 +627,7 @@
             });
 
             myChart.data.labels = labels;
-            myChart.data.datasets[0].label = `${selectedExercise} (${metric})`;
+            myChart.data.datasets[0].label = `${selectedExercise} - ${metric} (${timeframe})`;
             myChart.data.datasets[0].data = dataValues;
             myChart.update();
         }
@@ -497,7 +636,8 @@
         async function exportDataJSON() {
             const exercises = await dbGetAll('exercises');
             const workoutHistory = await dbGetAll('workoutHistory');
-            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify({ exercises, workoutHistory }, null, 2));
+            const units = await dbGetAll('units');
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify({ exercises, workoutHistory, units }, null, 2));
             
             const dlAnchor = document.createElement('a');
             dlAnchor.setAttribute("href", dataStr);
@@ -539,6 +679,10 @@
                     if (data.workoutHistory && Array.isArray(data.workoutHistory)) {
                         for (let item of data.workoutHistory) await dbPut('workoutHistory', item);
                     }
+                    if (data.units && Array.isArray(data.units)) {
+                        for (let u of data.units) await dbPut('units', u);
+                    }
+                    await loadUnitsDropdowns();
                     await loadExerciseDropdowns();
                     await renderHistory();
                     updateChart();
