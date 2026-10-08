@@ -1,4 +1,4 @@
-const CACHE_NAME = 'windows-pwa-cache-v2'; // Incrementing version forces an update
+const CACHE_NAME = 'windows-pwa-cache-v3'; // Incrementing version forces an update
 const urlsToCache = [
   './',
   './index.html',
