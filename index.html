@@ -3,43 +3,142 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PWA Test App</title>
+    <title>Exercise Tracker</title>
     <link rel="manifest" href="manifest.json">
     <style>
-        body { font-family: sans-serif; text-align: center; padding: 40px; background-color: #f4f4f9; }
-        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); max-width: 400px; margin: 0 auto; }
-        .status { padding: 10px; margin-top: 20px; border-radius: 5px; font-weight: bold; }
+        body { font-family: Segoe UI, sans-serif; margin: 0; padding: 20px; background-color: #f4f4f9; color: #333; }
+        .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); max-width: 450px; margin: 0 auto 20px auto; }
+        h1, h2 { text-align: center; margin-top: 0; }
+        label { display: block; margin-top: 10px; font-weight: bold; font-size: 0.9em; }
+        input, select, button { width: 100%; padding: 12px; margin-top: 5px; border-radius: 8px; border: 1px solid #ccc; box-sizing: border-box; font-size: 1em; }
+        button { background-color: #007bff; color: white; border: none; font-weight: bold; cursor: pointer; margin-top: 15px; }
+        button:active { background-color: #0056b3; }
+        
+        /* Counter Button Styles */
+        .counter-btn { background-color: #28a745; font-size: 1.8em; padding: 20px; margin-top: 10px; }
+        .counter-btn:active { background-color: #1e7e34; transform: scale(0.98); }
+        .rep-display { text-align: center; font-size: 3em; font-weight: bold; margin: 10px 0; color: #007bff; }
+        .secondary-btn { background-color: #6c757d; margin-top: 10px; }
+        .status-bar { text-align: center; font-size: 0.85em; padding: 5px; border-radius: 4px; margin-bottom: 15px; }
     </style>
 </head>
 <body>
+
     <div class="card">
-        <h1>My PWA Test</h1>
-        <p>If you see this, your web file setup worked!</p>
-        <div id="status" class="status">Checking connection...</div>
+        <div id="status" class="status-bar">Checking status...</div>
+        <h1>Exercise Tracker</h1>
+    </div>
+
+    <!-- 1. SETUP EXERCISE SECTION -->
+    <div class="card">
+        <h2>1. Create New Exercise</h2>
+        <label for="new-exercise-name">Exercise Name</label>
+        <input type="text" id="new-exercise-name" placeholder="e.g., Shoulder Press, Band Pulls">
+        <button onclick="saveNewExercise()">Save Exercise</button>
+    </div>
+
+    <!-- 2. LOG WORKOUT SECTION -->
+    <div class="card">
+        <h2>2. Track Workout</h2>
+        
+        <label for="exercise-select">Select Exercise</label>
+        <select id="exercise-select">
+            <option value="">-- Choose an exercise --</option>
+        </select>
+
+        <label for="intensity-input">Intensity / Weight (e.g., 5 lbs, Band Level 2)</label>
+        <input type="text" id="intensity-input" placeholder="e.g., 10 lbs">
+
+        <label>Current Reps Completed</label>
+        <div id="rep-count" class="rep-display">0</div>
+
+        <!-- Big Rep Counter Button -->
+        <button class="counter-btn" onclick="addRep()">+1 Rep</button>
+        <button class="secondary-btn" onclick="resetReps()">Reset Rep Count</button>
     </div>
 
     <script>
+        // Register Service Worker for offline support
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('sw.js')
-                .then(() => console.log('Service Worker Registered Successfully'))
-                .catch(err => console.log('Service Worker Registration Failed', err));
+                .then(() => console.log('Service Worker Registered'))
+                .catch(err => console.log('Service Worker Failed', err));
         }
 
+        // Handle online/offline UI indicator
         const statusDiv = document.getElementById('status');
         function updateStatus() {
             if (navigator.onLine) {
                 statusDiv.style.backgroundColor = '#d4edda';
                 statusDiv.style.color = '#155724';
-                statusDiv.innerText = 'Online (Connected)';
+                statusDiv.innerText = 'Online';
             } else {
                 statusDiv.style.backgroundColor = '#f8d7da';
                 statusDiv.style.color = '#721c24';
-                statusDiv.innerText = 'Offline (Running from cached files!)';
+                statusDiv.innerText = 'Offline Mode';
             }
         }
         window.addEventListener('online', updateStatus);
         window.addEventListener('offline', updateStatus);
         updateStatus();
+
+        // Application State variables
+        let currentReps = 0;
+
+        // Load saved exercises from local memory on page launch
+        document.addEventListener('DOMContentLoaded', loadExerciseDropdown);
+
+        function saveNewExercise() {
+            const nameInput = document.getElementById('new-exercise-name');
+            const exerciseName = nameInput.value.trim();
+
+            if (!exerciseName) {
+                alert('Please enter an exercise name.');
+                return;
+            }
+
+            // Fetch existing exercises array or start empty
+            let exercises = JSON.parse(localStorage.getItem('exercises')) || [];
+            
+            if (!exercises.includes(exerciseName)) {
+                exercises.push(exerciseName);
+                localStorage.setItem('exercises', JSON.stringify(exercises));
+                nameInput.value = '';
+                loadExerciseDropdown();
+                alert(`Saved "${exerciseName}"!`);
+            } else {
+                alert('That exercise already exists.');
+            }
+        }
+
+        function loadExerciseDropdown() {
+            const dropdown = document.getElementById('exercise-select');
+            const exercises = JSON.parse(localStorage.getItem('exercises')) || [];
+
+            dropdown.innerHTML = '<option value="">-- Choose an exercise --</option>';
+            exercises.forEach(name => {
+                const opt = document.createElement('option');
+                opt.value = name;
+                opt.innerText = name;
+                dropdown.appendChild(opt);
+            });
+        }
+
+        function addRep() {
+            const selectedExercise = document.getElementById('exercise-select').value;
+            if (!selectedExercise) {
+                alert('Please select an exercise first!');
+                return;
+            }
+
+            currentReps += 1;
+            document.getElementById('rep-count').innerText = currentReps;
+        }
+
+        function resetReps() {
+            currentReps = 0;
+            document.getElementById('rep-count').innerText = currentReps;
+        }
     </script>
 </body>
 </html>
