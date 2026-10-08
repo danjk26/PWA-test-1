@@ -18,7 +18,7 @@
         /* Top Navigation Tabs */
         nav { display: flex; background: #0056b3; overflow-x: auto; }
         nav button { flex: 1; background: none; border: none; color: #d0e2ff; padding: 12px 8px; font-size: 0.9em; font-weight: bold; cursor: pointer; border-bottom: 3px solid transparent; border-radius: 0; margin: 0; white-space: nowrap; }
-        nav button.active { color: white; border-bottom: 3px solid #white; background: rgba(255,255,255,0.1); }
+        nav button.active { color: white; border-bottom: 3px solid white; background: rgba(255,255,255,0.1); }
         
         /* Page Views */
         .page { display: none; padding: 20px; max-width: 480px; margin: 0 auto; }
@@ -39,6 +39,11 @@
         .mult-btn { flex: 1; padding: 8px; font-size: 0.85em; background: #e9ecef; color: #495057; border: 1px solid #ced4da; margin-top: 0; }
         .mult-btn.active { background: #007bff; color: white; border-color: #007bff; }
         
+        /* Exercise Checkbox Selector Container */
+        .checkbox-group { max-height: 140px; overflow-y: auto; border: 1px solid #ccc; border-radius: 8px; padding: 10px; margin-top: 5px; background: #fafafa; }
+        .checkbox-item { display: flex; align-items: center; gap: 8px; font-size: 0.95em; margin-bottom: 6px; cursor: pointer; }
+        .checkbox-item input[type="checkbox"] { width: auto; margin: 0; }
+        
         .btn-row { display: flex; gap: 10px; margin-top: 10px; }
         .counter-btn { background-color: #28a745; font-size: 1.4em; padding: 18px; flex: 2; margin-top: 0; }
         .undo-btn { background-color: #dc3545; font-size: 1.1em; padding: 18px; flex: 1; margin-top: 0; }
@@ -50,7 +55,8 @@
         .rep-display { text-align: center; font-size: 3em; font-weight: bold; margin: 10px 0; color: #007bff; }
         .log-item { background: #f8f9fa; border-left: 4px solid #007bff; padding: 12px; margin-top: 10px; border-radius: 4px; font-size: 0.95em; }
         .log-date { font-size: 0.75em; color: #6c6c6c; margin-top: 4px; }
-        .chart-container { position: relative; width: 100%; height: 260px; margin-top: 15px; }
+        .chart-container { position: relative; width: 100%; height: 280px; margin-top: 15px; }
+        .version-tag { font-size: 0.85em; color: #6c6c6c; margin-top: 12px; text-align: center; font-family: monospace; }
         input[type="file"] { display: none; }
     </style>
 </head>
@@ -75,7 +81,7 @@
             <h2>Track Workout</h2>
             
             <label for="exercise-select">Select Exercise</label>
-            <select id="exercise-select" onchange="updateChart()">
+            <select id="exercise-select">
                 <option value="">-- Choose an exercise --</option>
             </select>
 
@@ -134,7 +140,12 @@
         <div class="card">
             <h2>Progress Chart</h2>
             
-            <div class="inline-group">
+            <label>Select Exercises to Plot</label>
+            <div id="chart-exercises-checkboxes" class="checkbox-group">
+                <!-- Dynamically populated checkboxes -->
+            </div>
+
+            <div class="inline-group" style="margin-top: 10px;">
                 <div>
                     <label for="chart-metric-select">Metric to Plot</label>
                     <select id="chart-metric-select" onchange="updateChart()">
@@ -196,10 +207,16 @@
         <div class="card" style="text-align: center;">
             <h2>App Updates</h2>
             <button id="update-btn" class="secondary-btn" onclick="checkForAppUpdate()">Check for App Update</button>
+            <div id="version-display" class="version-tag">Version: Loading...</div>
         </div>
     </div>
 
     <script>
+        const CHART_COLORS = [
+            '#007bff', '#28a745', '#dc3545', '#fd7e14', '#6f42c1', 
+            '#17a2b8', '#e83e8c', '#20c997', '#6c757d', '#ffc107'
+        ];
+
         // --- NAVIGATION ---
         function switchPage(pageId, btnElement) {
             document.querySelectorAll('.page').forEach(page => page.classList.remove('active'));
@@ -283,11 +300,32 @@
             });
         }
 
-        // Service Worker
+        // Service Worker Registration & Version Fetching
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('sw.js')
-                .then(() => console.log('Service Worker Registered'))
+                .then(() => {
+                    console.log('Service Worker Registered');
+                    fetchActiveVersion();
+                })
                 .catch(err => console.log('Service Worker Failed', err));
+
+            navigator.serviceWorker.addEventListener('message', (event) => {
+                if (event.data && event.data.type === 'VERSION_INFO') {
+                    document.getElementById('version-display').innerText = `Active Cache: ${event.data.version}`;
+                }
+            });
+        }
+
+        function fetchActiveVersion() {
+            if (navigator.serviceWorker.controller) {
+                const messageChannel = new MessageChannel();
+                messageChannel.port1.onmessage = (event) => {
+                    if (event.data && event.data.version) {
+                        document.getElementById('version-display').innerText = `Active Cache: ${event.data.version}`;
+                    }
+                };
+                navigator.serviceWorker.controller.postMessage({ type: 'GET_VERSION' }, [messageChannel.port2]);
+            }
         }
 
         // Online/Offline Status
@@ -318,6 +356,7 @@
             await loadExerciseDropdowns();
             await renderHistory();
             initChart();
+            setTimeout(fetchActiveVersion, 500);
         });
 
         // --- UNITS MANAGEMENT ---
@@ -428,12 +467,18 @@
         async function loadExerciseDropdowns() {
             const logDropdown = document.getElementById('exercise-select');
             const deleteDropdown = document.getElementById('delete-exercise-select');
+            const checkboxContainer = document.getElementById('chart-exercises-checkboxes');
             const exercises = await dbGetAll('exercises');
 
             logDropdown.innerHTML = '<option value="">-- Choose an exercise --</option>';
             deleteDropdown.innerHTML = '<option value="">-- Select exercise to delete --</option>';
+            checkboxContainer.innerHTML = '';
 
-            exercises.forEach(item => {
+            if (exercises.length === 0) {
+                checkboxContainer.innerHTML = '<div style="color:#777; font-size:0.85em;">No saved exercises yet.</div>';
+            }
+
+            exercises.forEach((item, idx) => {
                 const opt1 = document.createElement('option');
                 opt1.value = item.name;
                 opt1.innerText = item.name;
@@ -443,7 +488,16 @@
                 opt2.value = item.name;
                 opt2.innerText = item.name;
                 deleteDropdown.appendChild(opt2);
+
+                const label = document.createElement('label');
+                label.className = 'checkbox-item';
+                label.innerHTML = `
+                    <input type="checkbox" value="${item.name}" onchange="updateChart()" ${idx === 0 ? 'checked' : ''}>
+                    ${item.name}
+                `;
+                checkboxContainer.appendChild(label);
             });
+
             updateChart();
         }
 
@@ -554,14 +608,7 @@
                 type: 'line',
                 data: {
                     labels: [],
-                    datasets: [{
-                        label: 'Progress',
-                        data: [],
-                        borderColor: '#007bff',
-                        backgroundColor: 'rgba(0, 123, 255, 0.1)',
-                        fill: true,
-                        tension: 0.2
-                    }]
+                    datasets: []
                 },
                 options: {
                     responsive: true,
@@ -583,52 +630,78 @@
             } else if (timeframe === 'monthly') {
                 return dateObj.toLocaleDateString(undefined, { year: 'numeric', month: 'short' });
             }
-            return dateObj.toLocaleDateString(); // Daily default
+            return dateObj.toLocaleDateString();
         }
 
         async function updateChart() {
             if (!myChart) return;
-            const selectedExercise = document.getElementById('exercise-select').value;
+
+            const selectedCheckboxes = Array.from(document.querySelectorAll('#chart-exercises-checkboxes input[type="checkbox"]:checked'));
+            const selectedExercises = selectedCheckboxes.map(cb => cb.value);
+
             const metric = document.getElementById('chart-metric-select').value;
             const timeframe = document.getElementById('chart-timeframe-select').value;
 
-            if (!selectedExercise) {
+            if (selectedExercises.length === 0) {
                 myChart.data.labels = [];
-                myChart.data.datasets[0].data = [];
+                myChart.data.datasets = [];
                 myChart.update();
                 return;
             }
 
             const allHistory = await dbGetAll('workoutHistory');
-            const exerciseData = allHistory
-                .filter(item => item.exercise === selectedExercise)
+            
+            const filteredHistory = allHistory
+                .filter(item => selectedExercises.includes(item.exercise))
                 .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 
-            const grouped = {};
-            exerciseData.forEach(item => {
-                const d = new Date(item.timestamp);
-                const timeKey = getTimeframeKey(d, timeframe);
-                if (!grouped[timeKey]) grouped[timeKey] = [];
-                grouped[timeKey].push(item);
+            const timeLabelSet = new Set();
+            filteredHistory.forEach(item => {
+                const key = getTimeframeKey(new Date(item.timestamp), timeframe);
+                timeLabelSet.add(key);
+            });
+            const globalLabels = Array.from(timeLabelSet);
+
+            const datasets = selectedExercises.map((exName, idx) => {
+                const exerciseSets = filteredHistory.filter(item => item.exercise === exName);
+
+                const grouped = {};
+                exerciseSets.forEach(item => {
+                    const key = getTimeframeKey(new Date(item.timestamp), timeframe);
+                    if (!grouped[key]) grouped[key] = [];
+                    grouped[key].push(item);
+                });
+
+                const dataValues = globalLabels.map(labelKey => {
+                    const sets = grouped[labelKey];
+                    if (!sets || sets.length === 0) return null;
+
+                    if (metric === 'sumWeight') {
+                        return sets.reduce((sum, s) => sum + s.weight, 0);
+                    } else if (metric === 'maxWeight') {
+                        return Math.max(...sets.map(s => s.weight));
+                    } else if (metric === 'totalVolume') {
+                        return sets.reduce((sum, s) => sum + (s.weight * s.reps), 0);
+                    } else if (metric === 'totalReps') {
+                        return sets.reduce((sum, s) => sum + s.reps, 0);
+                    }
+                });
+
+                const color = CHART_COLORS[idx % CHART_COLORS.length];
+
+                return {
+                    label: exName,
+                    data: dataValues,
+                    borderColor: color,
+                    backgroundColor: color + '22',
+                    fill: false,
+                    tension: 0.2,
+                    spanGaps: true
+                };
             });
 
-            const labels = Object.keys(grouped);
-            const dataValues = labels.map(key => {
-                const sets = grouped[key];
-                if (metric === 'sumWeight') {
-                    return sets.reduce((sum, s) => sum + s.weight, 0);
-                } else if (metric === 'maxWeight') {
-                    return Math.max(...sets.map(s => s.weight));
-                } else if (metric === 'totalVolume') {
-                    return sets.reduce((sum, s) => sum + (s.weight * s.reps), 0);
-                } else if (metric === 'totalReps') {
-                    return sets.reduce((sum, s) => sum + s.reps, 0);
-                }
-            });
-
-            myChart.data.labels = labels;
-            myChart.data.datasets[0].label = `${selectedExercise} - ${metric} (${timeframe})`;
-            myChart.data.datasets[0].data = dataValues;
+            myChart.data.labels = globalLabels;
+            myChart.data.datasets = datasets;
             myChart.update();
         }
 
