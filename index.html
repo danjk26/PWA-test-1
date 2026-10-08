@@ -14,7 +14,6 @@
         button { background-color: #007bff; color: white; border: none; font-weight: bold; cursor: pointer; margin-top: 15px; }
         button:active { background-color: #0056b3; }
         
-        /* Counter Button Styles */
         .counter-btn { background-color: #28a745; font-size: 1.8em; padding: 20px; margin-top: 10px; }
         .counter-btn:active { background-color: #1e7e34; transform: scale(0.98); }
         .rep-display { text-align: center; font-size: 3em; font-weight: bold; margin: 10px 0; color: #007bff; }
@@ -52,7 +51,6 @@
         <label>Current Reps Completed</label>
         <div id="rep-count" class="rep-display">0</div>
 
-        <!-- Big Rep Counter Button -->
         <button class="counter-btn" onclick="addRep()">+1 Rep</button>
         <button class="secondary-btn" onclick="resetReps()">Reset Rep Count</button>
     </div>
@@ -63,14 +61,12 @@
     </div>
 
     <script>
-        // Register Service Worker for offline support
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('sw.js')
                 .then(() => console.log('Service Worker Registered'))
                 .catch(err => console.log('Service Worker Failed', err));
         }
 
-        // Handle online/offline UI indicator
         const statusDiv = document.getElementById('status');
         function updateStatus() {
             if (navigator.onLine) {
@@ -87,10 +83,8 @@
         window.addEventListener('offline', updateStatus);
         updateStatus();
 
-        // Application State variables
         let currentReps = 0;
 
-        // Load saved exercises from local memory on page launch
         document.addEventListener('DOMContentLoaded', loadExerciseDropdown);
 
         function saveNewExercise() {
@@ -102,7 +96,6 @@
                 return;
             }
 
-            // Fetch existing exercises array or start empty
             let exercises = JSON.parse(localStorage.getItem('exercises')) || [];
             
             if (!exercises.includes(exerciseName)) {
@@ -110,7 +103,7 @@
                 localStorage.setItem('exercises', JSON.stringify(exercises));
                 nameInput.value = '';
                 loadExerciseDropdown();
-                alert(`Saved "\${exerciseName}"!`);
+                alert(`Saved "${exerciseName}"!`);
             } else {
                 alert('That exercise already exists.');
             }
@@ -145,7 +138,6 @@
             document.getElementById('rep-count').innerText = currentReps;
         }
 
-        // Check GitHub server for new sw.js updates
         function checkForAppUpdate() {
             const updateBtn = document.getElementById('update-btn');
             updateBtn.innerText = 'Checking GitHub...';
