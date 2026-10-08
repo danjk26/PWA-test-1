@@ -24,7 +24,6 @@
         .secondary-btn { background-color: #6c757d; margin-top: 10px; }
         .status-bar { text-align: center; font-size: 0.85em; padding: 5px; border-radius: 4px; margin-bottom: 15px; }
         
-        /* History Log Item Styles */
         .log-item { background: #f8f9fa; border-left: 4px solid #007bff; padding: 12px; margin-top: 10px; border-radius: 4px; font-size: 0.95em; }
         .log-date { font-size: 0.75em; color: #6c6c6c; margin-top: 4px; }
     </style>
@@ -257,7 +256,7 @@
             }
         }
 
-        // Clean update checker using controllerchange event
+        // Cache-busting update checker
         function checkForAppUpdate() {
             const updateBtn = document.getElementById('update-btn');
             updateBtn.innerText = 'Checking GitHub...';
@@ -270,7 +269,6 @@
                         return;
                     }
 
-                    // Reload page ONLY after new service worker takes full control
                     let refreshing = false;
                     navigator.serviceWorker.addEventListener('controllerchange', () => {
                         if (!refreshing) {
@@ -279,28 +277,31 @@
                         }
                     });
 
-                    // Force check sw.js from server
-                    registration.update().then(() => {
-                        if (registration.waiting) {
-                            updateBtn.innerText = 'Updating...';
-                            registration.waiting.postMessage('skipWaiting');
-                        } else if (registration.installing) {
-                            updateBtn.innerText = 'Installing update...';
-                            registration.installing.addEventListener('statechange', (e) => {
-                                if (e.target.state === 'installed') {
-                                    registration.waiting.postMessage('skipWaiting');
-                                }
-                            });
-                        } else {
-                            setTimeout(() => {
-                                updateBtn.innerText = 'Check for App Update';
-                                alert('App is already up to date!');
-                            }, 1000);
-                        }
-                    }).catch(err => {
-                        updateBtn.innerText = 'Check for App Update';
-                        alert('Could not check for updates. Check connection.');
-                    });
+                    // Bypass HTTP cache by fetching sw.js with a timestamp
+                    fetch('./sw.js?t=' + Date.now(), { cache: 'no-store' })
+                        .then(() => registration.update())
+                        .then(() => {
+                            if (registration.waiting) {
+                                updateBtn.innerText = 'Updating...';
+                                registration.waiting.postMessage('skipWaiting');
+                            } else if (registration.installing) {
+                                updateBtn.innerText = 'Installing update...';
+                                registration.installing.addEventListener('statechange', (e) => {
+                                    if (e.target.state === 'installed') {
+                                        registration.waiting.postMessage('skipWaiting');
+                                    }
+                                });
+                            } else {
+                                setTimeout(() => {
+                                    updateBtn.innerText = 'Check for App Update';
+                                    alert('App is already up to date!');
+                                }, 1000);
+                            }
+                        })
+                        .catch(err => {
+                            updateBtn.innerText = 'Check for App Update';
+                            alert('Could not check for updates. Check connection.');
+                        });
                 });
             } else {
                 alert('Service Workers not supported.');
