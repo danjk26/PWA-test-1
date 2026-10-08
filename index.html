@@ -14,11 +14,19 @@
         button { background-color: #007bff; color: white; border: none; font-weight: bold; cursor: pointer; margin-top: 15px; }
         button:active { background-color: #0056b3; }
         
-        .counter-btn { background-color: #28a745; font-size: 1.8em; padding: 20px; margin-top: 10px; }
-        .counter-btn:active { background-color: #1e7e34; transform: scale(0.98); }
+        .btn-row { display: flex; gap: 10px; margin-top: 10px; }
+        .counter-btn { background-color: #28a745; font-size: 1.5em; padding: 18px; flex: 2; margin-top: 0; }
+        .undo-btn { background-color: #dc3545; font-size: 1.2em; padding: 18px; flex: 1; margin-top: 0; }
+        .save-set-btn { background-color: #17a2b8; font-size: 1.1em; padding: 15px; }
+        .danger-btn { background-color: #dc3545; margin-top: 10px; }
+        
         .rep-display { text-align: center; font-size: 3em; font-weight: bold; margin: 10px 0; color: #007bff; }
         .secondary-btn { background-color: #6c757d; margin-top: 10px; }
         .status-bar { text-align: center; font-size: 0.85em; padding: 5px; border-radius: 4px; margin-bottom: 15px; }
+        
+        /* History Log Item Styles */
+        .log-item { background: #f8f9fa; border-left: 4px solid #007bff; padding: 12px; margin-top: 10px; border-radius: 4px; font-size: 0.95em; }
+        .log-date { font-size: 0.75em; color: #6c6c6c; margin-top: 4px; }
     </style>
 </head>
 <body>
@@ -30,10 +38,16 @@
 
     <!-- 1. SETUP EXERCISE SECTION -->
     <div class="card">
-        <h2>1. Create New Exercise</h2>
-        <label for="new-exercise-name">Exercise Name</label>
+        <h2>1. Exercise Setup</h2>
+        <label for="new-exercise-name">New Exercise Name</label>
         <input type="text" id="new-exercise-name" placeholder="e.g., Shoulder Press, Band Pulls">
         <button onclick="saveNewExercise()">Save Exercise</button>
+        
+        <label for="delete-exercise-select" style="margin-top:20px;">Delete Existing Exercise</label>
+        <select id="delete-exercise-select">
+            <option value="">-- Select exercise to delete --</option>
+        </select>
+        <button class="danger-btn" onclick="deleteExercise()">Delete Selected Exercise</button>
     </div>
 
     <!-- 2. LOG WORKOUT SECTION -->
@@ -45,28 +59,43 @@
             <option value="">-- Choose an exercise --</option>
         </select>
 
-        <label for="intensity-input">Intensity / Weight (e.g., 5 lbs, Band Level 2)</label>
-        <input type="text" id="intensity-input" placeholder="e.g., 10 lbs">
+        <label for="intensity-input">Intensity / Weight</label>
+        <input type="text" id="intensity-input" placeholder="e.g., 10 lbs, Red Band">
 
         <label>Current Reps Completed</label>
         <div id="rep-count" class="rep-display">0</div>
 
-        <button class="counter-btn" onclick="addRep()">+1 Rep</button>
+        <!-- Counter & Undo Buttons side-by-side -->
+        <div class="btn-row">
+            <button class="counter-btn" onclick="addRep()">+1 Rep</button>
+            <button class="undo-btn" onclick="undoRep()">-1 Rep</button>
+        </div>
+
+        <button class="save-set-btn" onclick="commitSet()">Save Completed Set</button>
         <button class="secondary-btn" onclick="resetReps()">Reset Rep Count</button>
     </div>
 
-    <!-- 3. UPDATE APP SECTION -->
+    <!-- 3. WORKOUT HISTORY SECTION -->
+    <div class="card">
+        <h2>3. Workout History</h2>
+        <div id="history-container">No completed sets logged yet.</div>
+        <button class="secondary-btn" onclick="clearHistory()" style="margin-top:15px; font-size: 0.8em;">Clear History Log</button>
+    </div>
+
+    <!-- 4. UPDATE APP SECTION -->
     <div class="card" style="text-align: center;">
         <button id="update-btn" class="secondary-btn" onclick="checkForAppUpdate()">Check for App Update</button>
     </div>
 
     <script>
+        // Service Worker Registration
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('sw.js')
                 .then(() => console.log('Service Worker Registered'))
                 .catch(err => console.log('Service Worker Failed', err));
         }
 
+        // Online/Offline status
         const statusDiv = document.getElementById('status');
         function updateStatus() {
             if (navigator.onLine) {
@@ -85,8 +114,12 @@
 
         let currentReps = 0;
 
-        document.addEventListener('DOMContentLoaded', loadExerciseDropdown);
+        document.addEventListener('DOMContentLoaded', () => {
+            loadExerciseDropdowns();
+            renderHistory();
+        });
 
+        // Save a new custom exercise
         function saveNewExercise() {
             const nameInput = document.getElementById('new-exercise-name');
             const exerciseName = nameInput.value.trim();
@@ -97,40 +130,74 @@
             }
 
             let exercises = JSON.parse(localStorage.getItem('exercises')) || [];
-            
             if (!exercises.includes(exerciseName)) {
                 exercises.push(exerciseName);
                 localStorage.setItem('exercises', JSON.stringify(exercises));
                 nameInput.value = '';
-                loadExerciseDropdown();
+                loadExerciseDropdowns();
                 alert(`Saved "${exerciseName}"!`);
             } else {
                 alert('That exercise already exists.');
             }
         }
 
-        function loadExerciseDropdown() {
-            const dropdown = document.getElementById('exercise-select');
+        // Delete an exercise from storage
+        function deleteExercise() {
+            const dropdown = document.getElementById('delete-exercise-select');
+            const selectedExercise = dropdown.value;
+
+            if (!selectedExercise) {
+                alert('Please select an exercise to delete.');
+                return;
+            }
+
+            if (confirm(`Are you sure you want to delete "${selectedExercise}"?`)) {
+                let exercises = JSON.parse(localStorage.getItem('exercises')) || [];
+                exercises = exercises.filter(ex => ex !== selectedExercise);
+                localStorage.setItem('exercises', JSON.stringify(exercises));
+                loadExerciseDropdowns();
+                alert(`Deleted "${selectedExercise}".`);
+            }
+        }
+
+        // Load exercises into both dropdown lists
+        function loadExerciseDropdowns() {
+            const logDropdown = document.getElementById('exercise-select');
+            const deleteDropdown = document.getElementById('delete-exercise-select');
             const exercises = JSON.parse(localStorage.getItem('exercises')) || [];
 
-            dropdown.innerHTML = '<option value="">-- Choose an exercise --</option>';
+            logDropdown.innerHTML = '<option value="">-- Choose an exercise --</option>';
+            deleteDropdown.innerHTML = '<option value="">-- Select exercise to delete --</option>';
+
             exercises.forEach(name => {
-                const opt = document.createElement('option');
-                opt.value = name;
-                opt.innerText = name;
-                dropdown.appendChild(opt);
+                const opt1 = document.createElement('option');
+                opt1.value = name;
+                opt1.innerText = name;
+                logDropdown.appendChild(opt1);
+
+                const opt2 = document.createElement('option');
+                opt2.value = name;
+                opt2.innerText = name;
+                deleteDropdown.appendChild(opt2);
             });
         }
 
+        // Rep Counter logic
         function addRep() {
             const selectedExercise = document.getElementById('exercise-select').value;
             if (!selectedExercise) {
                 alert('Please select an exercise first!');
                 return;
             }
-
             currentReps += 1;
             document.getElementById('rep-count').innerText = currentReps;
+        }
+
+        function undoRep() {
+            if (currentReps > 0) {
+                currentReps -= 1;
+                document.getElementById('rep-count').innerText = currentReps;
+            }
         }
 
         function resetReps() {
@@ -138,6 +205,69 @@
             document.getElementById('rep-count').innerText = currentReps;
         }
 
+        // Commit/Save finished set into history log
+        function commitSet() {
+            const selectedExercise = document.getElementById('exercise-select').value;
+            const intensity = document.getElementById('intensity-input').value.trim() || 'Bodyweight / Default';
+
+            if (!selectedExercise) {
+                alert('Please select an exercise before saving.');
+                return;
+            }
+
+            if (currentReps <= 0) {
+                alert('Please add at least 1 rep before saving a set.');
+                return;
+            }
+
+            const newSet = {
+                id: Date.now(),
+                exercise: selectedExercise,
+                intensity: intensity,
+                reps: currentReps,
+                timestamp: new Date().toLocaleString()
+            };
+
+            let history = JSON.parse(localStorage.getItem('workoutHistory')) || [];
+            history.unshift(newSet); // Add newest entries to the top
+            localStorage.setItem('workoutHistory', JSON.stringify(history));
+
+            // Reset counter for next set
+            resetReps();
+            renderHistory();
+            alert('Set saved to history!');
+        }
+
+        // Display saved history entries
+        function renderHistory() {
+            const container = document.getElementById('history-container');
+            const history = JSON.parse(localStorage.getItem('workoutHistory')) || [];
+
+            if (history.length === 0) {
+                container.innerHTML = '<p style="text-align:center; color:#777;">No completed sets logged yet.</p>';
+                return;
+            }
+
+            container.innerHTML = '';
+            history.forEach(item => {
+                const div = document.createElement('div');
+                div.className = 'log-item';
+                div.innerHTML = `
+                    <strong>${item.exercise}</strong> — ${item.reps} reps @ <em>${item.intensity}</em>
+                    <div class="log-date">${item.timestamp}</div>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        function clearHistory() {
+            if (confirm('Are you sure you want to clear your entire workout history log?')) {
+                localStorage.removeItem('workoutHistory');
+                renderHistory();
+            }
+        }
+
+        // Check for App Updates
         function checkForAppUpdate() {
             const updateBtn = document.getElementById('update-btn');
             updateBtn.innerText = 'Checking GitHub...';
