@@ -1,8 +1,9 @@
-const CACHE_NAME = 'windows-pwa-cache-v9';
+const CACHE_NAME = 'windows-pwa-cache-v10';
 const urlsToCache = [
   './',
   './index.html',
-  './manifest.json'
+  './manifest.json',
+  'https://cdn.jsdelivr.net/npm/chart.js'
 ];
 
 self.addEventListener('install', event => {
@@ -27,7 +28,7 @@ self.addEventListener('activate', event => {
   );
 });
 
-// Network-first strategy for HTML files to prevent stale caching
+// Network-first strategy for HTML files; Cache-first for assets
 self.addEventListener('fetch', event => {
   if (event.request.mode === 'navigate' || event.request.url.includes('index.html')) {
     event.respondWith(
