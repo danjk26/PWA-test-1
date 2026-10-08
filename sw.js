@@ -1,4 +1,4 @@
-const CACHE_NAME = 'windows-pwa-cache-v8';
+const CACHE_NAME = 'windows-pwa-cache-v9';
 const urlsToCache = [
   './',
   './index.html',
@@ -27,11 +27,24 @@ self.addEventListener('activate', event => {
   );
 });
 
+// Network-first strategy for HTML files to prevent stale caching
 self.addEventListener('fetch', event => {
-  event.respondWith(
-    caches.match(event.request)
-      .then(response => response || fetch(event.request))
-  );
+  if (event.request.mode === 'navigate' || event.request.url.includes('index.html')) {
+    event.respondWith(
+      fetch(event.request)
+        .then(response => {
+          const responseClone = response.clone();
+          caches.open(CACHE_NAME).then(cache => cache.put(event.request, responseClone));
+          return response;
+        })
+        .catch(() => caches.match(event.request))
+    );
+  } else {
+    event.respondWith(
+      caches.match(event.request)
+        .then(response => response || fetch(event.request))
+    );
+  }
 });
 
 self.addEventListener('message', event => {
