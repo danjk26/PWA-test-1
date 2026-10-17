@@ -387,11 +387,23 @@ async function renderHistory() {
         return;
     }
     container.innerHTML = history.map(item => `
-        <div class="log-item">
-            <strong>${item.exercise}</strong> — ${item.reps} rep(s) @ <em>${item.weight} ${item.unit}</em>${item.duration ? ` (\${item.duration}s hold)` : ''}
-            <div class="log-date">${item.displayDate || new Date(item.timestamp).toLocaleString()}</div>
+        <div class="log-item" style="display: flex; justify-content: space-between; align-items: center; gap: 10px;">
+            <div style="flex: 1;">
+                <strong>${item.exercise}</strong> — ${item.reps} rep(s) @ <em>${item.weight} ${item.unit}</em>${item.duration ? ` (\${item.duration}s hold)` : ''}
+                <div class="log-date">${item.displayDate || new Date(item.timestamp).toLocaleString()}</div>
+            </div>
+            <button class="danger-btn" onclick="deleteHistoryItem(${item.id})" style="margin: 0; padding: 6px 12px; font-size: 0.8em; width: auto; flex-shrink: 0;">Delete</button>
         </div>
     `).join('');
+}
+
+async function deleteHistoryItem(id) {
+    if (confirm('Are you sure you want to delete this specific set?')) {
+        await dbDelete('workoutHistory', id);
+        await renderHistory();
+        await onTrackExerciseChange();
+        updateChart();
+    }
 }
 
 async function clearHistory() {
@@ -426,6 +438,7 @@ async function updateChart() {
     }
 
     const allHistory = await dbGetAll('workoutHistory');
+    const allExercises = await dbGetAll('exercises');
     const filteredHistory = allHistory.filter(item => selectedExercises.includes(item.exercise)).sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
     
     const globalLabels = Array.from(new Set(filteredHistory.map(item => {
@@ -437,7 +450,9 @@ async function updateChart() {
         return timeframe === 'monthly' ? d.toLocaleDateString(undefined, { year: 'numeric', month: 'short' }) : d.toLocaleDateString();
     })));
 
-    const datasets = selectedExercises.map((exName, idx) => {
+    let datasets = [];
+
+    selectedExercises.forEach((exName, idx) => {
         const exerciseSets = filteredHistory.filter(item => item.exercise === exName);
         const grouped = {};
         exerciseSets.forEach(item => {
@@ -458,7 +473,35 @@ async function updateChart() {
         });
 
         const color = CHART_COLORS[idx % CHART_COLORS.length];
-        return { label: exName, data: dataValues, borderColor: color, backgroundColor: color + '22', fill: false, tension: 0.2, spanGaps: true };
+        
+        // 1. Add actual performance dataset
+        datasets.push({
+            label: exName,
+            data: dataValues,
+            borderColor: color,
+            backgroundColor: color + '22',
+            fill: false,
+            tension: 0.2,
+            spanGaps: true
+        });
+
+// 2. If viewing Total Work Volume and a target is set, add a dashed reference line for the goal
+        if (metric === 'totalVolume') {
+            const exRecord = allExercises.find(e => e.name === exName);
+            if (exRecord && exRecord.targetVolume && exRecord.targetVolume > 0) {
+                datasets.push({
+                    label: `${exName} (Goal)`,
+                    data: globalLabels.map(() => exRecord.targetVolume),
+                    borderColor: color,
+                    borderDash: [6, 6],
+                    borderWidth: 2,
+                    pointRadius: 1, // Ensures points render across dates
+                    pointHoverRadius: 4,
+                    fill: false,
+                    spanGaps: true
+                });
+            }
+        }
     });
 
     myChart.data.labels = globalLabels;
@@ -492,21 +535,44 @@ async function exportDataCSV() {
 }
 
 function importDataJSON(event) {
-    const reader = new FileReader();
-    reader.onload = async (e) => {
+    const fileReader = new FileReader();
+    fileReader.onload = async (e) => {
         try {
             const data = JSON.parse(e.target.result);
-            if (data.exercises) for (let ex of data.exercises) await dbPut('exercises', ex);
-            if (data.workoutHistory) for (let item of data.workoutHistory) await dbPut('workoutHistory', item);
-            if (data.units) for (let u of data.units) await dbPut('units', u);
+            
+            // Helper to perform batched writes inside a proper readwrite transaction
+            async function importStore(storeName, items) {
+                if (!items || !Array.isArray(items) || items.length === 0) return;
+                return new Promise((resolve, reject) => {
+                    const tx = db.transaction(storeName, 'readwrite');
+                    const store = tx.objectStore(storeName);
+                    
+                    tx.oncomplete = () => resolve();
+                    tx.onerror = (err) => reject(tx.error);
+
+                    items.forEach(item => {
+                        store.put(item);
+                    });
+                });
+            }
+
+            // Execute imports sequentially for each store
+            if (data.exercises) await importStore('exercises', data.exercises);
+            if (data.workoutHistory) await importStore('workoutHistory', data.workoutHistory);
+            if (data.units) await importStore('units', data.units);
+
             await loadUnitsDropdowns();
             await loadExerciseDropdowns();
             await renderHistory();
             updateChart();
-            alert('Imported successfully!');
-        } catch (err) { alert('Invalid JSON.'); }
+            
+            alert('JSON backup imported successfully!');
+        } catch (err) {
+            console.error("JSON Import Error:", err);
+            alert('Failed to import JSON file. Please ensure it is a valid backup.');
+        }
     };
-    reader.readAsText(event.target.files[0]);
+    fileReader.readAsText(event.target.files[0]);
 }
 
 function checkForAppUpdate() {
