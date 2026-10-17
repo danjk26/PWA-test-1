@@ -1,4 +1,4 @@
-const CACHE_NAME = 'windows-pwa-cache-v17';
+const CACHE_NAME = 'windows-pwa-cache-v18';
 const urlsToCache = [
   './',
   './index.html',
